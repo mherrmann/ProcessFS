@@ -1,5 +1,5 @@
 from fman import DirectoryPaneCommand
-from fman.fs import FileSystem, Column
+from fman.fs import FileSystem, Column, query
 from fman.url import splitscheme
 from os import strerror
 from psutil import process_iter, Process, NoSuchProcess
@@ -19,30 +19,56 @@ class ProcessesFileSystem(FileSystem):
 		return 'ProcessName', 'PID'
 	def iterdir(self, path):
 		if path:
-			children = _call_on_process(path, 'children')
-			pids = [child.pid for child in children]
+			pids = self._get_children(path)
 		else:
-			pids = psutil.pids()
+			pids = self._get_processes_cached()
 		return [str(pid) for pid in pids]
 	def resolve(self, path):
-		if not path:
-			# Showing all processes:
-			return self.scheme
-		pid = _path_to_pid(path)
-		return self.scheme + str(pid)
+		result = self.scheme
+		if path:
+			result += str(_path_to_pid(path))
+		return result
 	def is_dir(self, path):
-		if not path:
-			return True
-		return bool(_call_on_process(path, 'children'))
+		return not path or bool(self._get_children(path))
 	def delete(self, path):
 		_call_on_process(path, 'terminate')
+	def get_name(self, path):
+		pid = _path_to_pid(path)
+		try:
+			return self._get_processes_cached()[pid]['name']
+		except KeyError:
+			return _call_on_process(path, 'name')
+	def _get_children(self, path):
+		if path:
+			pid = _path_to_pid(path)
+			all_processes = self._get_processes_cached()
+			return all_processes.get(pid, {}).get('children', [])
+		return list(self._get_processes_cached())
+	def _get_processes_cached(self):
+		return query(self.scheme, '_get_processes')
+	def _get_processes(self, path):
+		assert not path, "%r != ''" % path
+		process_list = list(process_iter(attrs=('pid', 'ppid', 'name')))
+		result = {
+			p.pid: {
+				'name': p.name(),
+				'children': []
+			}
+			for p in process_list
+		}
+		for p in process_list:
+			try:
+				result[p.ppid()]['children'].append(p.pid)
+			except KeyError:
+				continue
+		return result
 
 class ProcessName(Column):
 
 	display_name = 'Name'
 
 	def get_str(self, url):
-		return _call_on_process(_get_path(url), 'name')
+		return query(url, 'get_name')
 
 class PID(Column):
 	def get_str(self, url):
