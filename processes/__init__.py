@@ -19,46 +19,46 @@ class ProcessesFileSystem(FileSystem):
 		return 'ProcessName', 'PID'
 	def iterdir(self, path):
 		if path:
-			pids = self._get_children(path)
-		else:
-			pids = self._get_processes_cached()
-		return [str(pid) for pid in pids]
+			pid_str = str(_path_to_pid(path))
+			def get_children():
+				self._get_processes()
+				try:
+					return self.cache.get(pid_str, 'children')
+				except KeyError:
+					raise _filenotfounderror(path) from None
+			return self.cache.query(pid_str, 'children', get_children)
+		return self._get_processes()
 	def resolve(self, path):
 		result = self.scheme
 		if path:
 			result += str(_path_to_pid(path))
 		return result
 	def is_dir(self, path):
-		return not path or bool(self._get_children(path))
+		return not path or bool(self.iterdir(path))
 	def delete(self, path):
 		_call_on_process(path, 'terminate')
 	def get_name(self, path):
-		pid = _path_to_pid(path)
-		try:
-			return self._get_processes_cached()[pid]['name']
-		except KeyError:
-			return _call_on_process(path, 'name')
-	def _get_children(self, path):
-		if path:
-			pid = _path_to_pid(path)
-			all_processes = self._get_processes_cached()
-			return all_processes.get(pid, {}).get('children', [])
-		return list(self._get_processes_cached())
-	def _get_processes_cached(self):
-		return query(self.scheme, '_get_processes')
-	def _get_processes(self, path):
-		assert not path, "%r != ''" % path
+		get_name = lambda: _call_on_process(path, 'name')
+		return self.cache.query(path, 'name', get_name)
+	def _get_processes(self):
+		def load_processes():
+			process_infos = self._load_process_infos()
+			for pid_str, attrs in process_infos.items():
+				for attr, value in attrs.items():
+					self.cache.put(pid_str, attr, value)
+			return list(process_infos)
+		return self.cache.query('', 'iterdir', load_processes)
+	def _load_process_infos(self):
+		result = {}
 		process_list = list(process_iter(attrs=('pid', 'ppid', 'name')))
-		result = {
-			p.pid: {
+		for p in process_list:
+			result[str(p.pid)] = {
 				'name': p.name(),
 				'children': []
 			}
-			for p in process_list
-		}
 		for p in process_list:
 			try:
-				result[p.ppid()]['children'].append(p.pid)
+				result[str(p.ppid())]['children'].append(str(p.pid))
 			except KeyError:
 				continue
 		return result
@@ -81,13 +81,13 @@ def _call_on_process(path, method_name):
 	try:
 		return getattr(Process(pid), method_name)()
 	except NoSuchProcess:
-		raise _filenotfounderror('proces://' + path)
+		raise _filenotfounderror(path) from None
 
 def _path_to_pid(path):
 	try:
 		return int(path.split('/')[-1])
 	except ValueError:
-		raise _filenotfounderror(self.scheme + path)
+		raise _filenotfounderror(path) from None
 
 def _get_path(url):
 	scheme, path = splitscheme(url)
@@ -95,5 +95,5 @@ def _get_path(url):
 		raise ValueError('Unsupported URL: %r' % url)
 	return path
 
-def _filenotfounderror(url):
-	return FileNotFoundError(errno.ENOENT, strerror(errno.ENOENT), url)
+def _filenotfounderror(path):
+	return FileNotFoundError(errno.ENOENT, strerror(errno.ENOENT), 'process://' + path)
