@@ -19,15 +19,16 @@ class ProcessesFileSystem(FileSystem):
 		return 'ProcessName', 'PID'
 	def iterdir(self, path):
 		if path:
-			pid_str = str(_path_to_pid(path))
+			pid = _path_to_pid(path)
 			def get_children():
-				self._get_processes()
-				try:
-					return self.cache.get(pid_str, 'children')
-				except KeyError:
-					raise _filenotfounderror(path) from None
-			return self.cache.query(pid_str, 'children', get_children)
-		return self._get_processes()
+				return [str(c.pid) for c in Process(pid).children()]
+			return self.cache.query(str(pid), 'children', get_children)
+		else:
+			process_infos = self._load_process_infos()
+			for pid_str, attrs in process_infos.items():
+				for attr, value in attrs.items():
+					self.cache.put(pid_str, attr, value)
+			return list(process_infos)
 	def resolve(self, path):
 		result = self.scheme
 		if path:
@@ -38,32 +39,18 @@ class ProcessesFileSystem(FileSystem):
 	def delete(self, path):
 		_call_on_process(path, 'terminate')
 	def get_name(self, path):
-		get_name = lambda: _call_on_process(path, 'name')
-		return self.cache.query(path, 'name', get_name)
-	def _get_processes(self):
-		def load_processes():
-			process_infos = self._load_process_infos()
-			for pid_str, attrs in process_infos.items():
-				for attr, value in attrs.items():
-					self.cache.put(pid_str, attr, value)
-			return list(process_infos)
-		return self.cache.query('', 'iterdir', load_processes)
+		load_name = lambda: _call_on_process(path, 'name')
+		return self.cache.query(path, 'name', load_name)
 	def _load_process_infos(self):
 		result = {}
-		process_list = list(process_iter(attrs=('pid', 'ppid', 'name')))
-		for p in process_list:
-			result[str(p.pid)] = {
-				'name': p.name(),
-				'children': []
-			}
-		for p in process_list:
+		for p in process_iter(attrs=('pid', 'ppid', 'name')):
+			info = dict(p.info)
+			info['children'] = []
+			pid_str = str(info.pop('pid'))
+			result[pid_str] = info
+		for pid_str, info in result.items():
 			try:
-				ppid = p.ppid()
-			except ProcessLookupError:
-				# Process has died since we queried the list of processes.
-				continue
-			try:
-				result[str(ppid)]['children'].append(str(p.pid))
+				result[str(info['ppid'])]['children'].append(pid_str)
 			except KeyError:
 				continue
 		return result
