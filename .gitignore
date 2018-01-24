@@ -1,6 +1,6 @@
-# Byte-compiled / optimized / DLL files
+# Byte-compiled / optimized files
 __pycache__/
-*.py[cod]
+*.py[co]
 *$py.class
 
 # Distribution / packaging
