@@ -58,7 +58,12 @@ class ProcessesFileSystem(FileSystem):
 			}
 		for p in process_list:
 			try:
-				result[str(p.ppid())]['children'].append(str(p.pid))
+				ppid = p.ppid()
+			except ProcessLookupError:
+				# Process has died since we queried the list of processes.
+				continue
+			try:
+				result[str(ppid)]['children'].append(str(p.pid))
 			except KeyError:
 				continue
 		return result
