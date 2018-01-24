@@ -1,5 +1,5 @@
 from fman import DirectoryPaneCommand
-from fman.fs import FileSystem, Column, query
+from fman.fs import FileSystem, Column
 from fman.url import splitscheme
 from os import strerror
 from psutil import process_iter, Process, NoSuchProcess
@@ -16,7 +16,10 @@ class ProcessesFileSystem(FileSystem):
 	scheme = 'process://'
 
 	def get_default_columns(self, path):
-		return 'ProcessName', 'PID'
+		return 'Name', 'PID'
+	def name(self, path):
+		load_name = lambda: _call_on_process(path, 'name')
+		return self.cache.query(path, 'name', load_name)
 	def iterdir(self, path):
 		if path:
 			pid = _path_to_pid(path)
@@ -38,9 +41,6 @@ class ProcessesFileSystem(FileSystem):
 		return not path or bool(self.iterdir(path))
 	def delete(self, path):
 		_call_on_process(path, 'terminate')
-	def get_name(self, path):
-		load_name = lambda: _call_on_process(path, 'name')
-		return self.cache.query(path, 'name', load_name)
 	def _load_process_infos(self):
 		result = {}
 		for p in process_iter(attrs=('pid', 'ppid', 'name')):
@@ -54,13 +54,6 @@ class ProcessesFileSystem(FileSystem):
 			except KeyError:
 				continue
 		return result
-
-class ProcessName(Column):
-
-	display_name = 'Name'
-
-	def get_str(self, url):
-		return query(url, 'get_name')
 
 class PID(Column):
 	def get_str(self, url):
