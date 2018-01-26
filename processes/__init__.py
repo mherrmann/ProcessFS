@@ -16,7 +16,7 @@ class ProcessesFileSystem(FileSystem):
 	scheme = 'process://'
 
 	def get_default_columns(self, path):
-		return 'Name', 'PID'
+		return 'core.Name', 'processes.PID'
 	def name(self, path):
 		load_name = lambda: _call_on_process(path, 'name')
 		return self.cache.query(path, 'name', load_name)
